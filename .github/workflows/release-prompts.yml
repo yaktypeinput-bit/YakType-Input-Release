@@ -1,0 +1,42 @@
+name: Release Prompt Package
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'prompt-hub/**'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Build Package
+        run: python3 prompt-hub/build_package.py
+
+      - name: Get timestamp
+        id: timestamp
+        run: echo "TS=$(date +'%Y.%m.%d.%H%M')" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "v${{ steps.timestamp.outputs.TS }}"
+          name: "Prompt Package Update ${{ steps.timestamp.outputs.TS }}"
+          files: prompt-package.json
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
