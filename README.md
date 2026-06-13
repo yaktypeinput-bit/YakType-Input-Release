@@ -20,6 +20,8 @@ YakType 是一款专为速度和隐私设计的 **多平台 (macOS/iOS)** 高级
 - **[Gemini 集成 (Shared Core)](core/Gemini-Integration.md)** — Gemini API 接入、OGG/AAC 编解码与长语音切分策略。
 - **[OpenAI / 兼容集成 (Shared Core)](core/OpenAI-Integration.md)** — 接入 OpenAI、DeepSeek 等兼容 Chat API 的通用后处理方案。
 - **[阿里云 ASR 集成 (Shared Core)](core/Aliyun-Integration.md)** — 阿里云 ASR 引擎在核心层的集成模型。
+- **[听写音频格式架构 (Shared Core)](core/Dictation-Audio-Format-Architecture.md)** — 听写管道音频格式约定、引擎上传格式偏好与转码分工。
+- **[平台分层审计报告 (Shared Core)](core/Platform-Architecture-Audit-2026-05.md)** — macOS 与 iOS Keyboard 共享核心下沉方案、回填机制与重构推荐顺序。
 
 ---
 
@@ -32,6 +34,7 @@ YakType 是一款专为速度和隐私设计的 **多平台 (macOS/iOS)** 高级
 #### UI / UX 设计
 
 - **[macOS 设计规范](macos/ui-ux/Design-Tokens.md)** — 液态玻璃 (Liquid Glass) 风格、Cosmic Pulse 配色系统。
+- **[macOS UI 设计指南（当前基线）](macos/ui-ux/UI-Design-Guidelines.md)** — 首页、引擎编排与管理页布局设计目标、视觉与交互规范基线。
 - **[macOS 局部布局架构](macos/ui-ux/Layout-Architecture.md)** — 窗口 Z-Index 堆叠、侧边栏及主内容区布局。
 - **[macOS 页面蓝图](macos/ui-ux/Page-Blueprints.md)** — 核心视图的交互原型 (ASCII) 与界面分布详述。
 - **[macOS 悬浮窗详情](macos/ui-ux/HUD-Interactions.md)** — HUD 生命周期管理与键盘交互细节规格。
@@ -50,4 +53,5 @@ YakType 是一款专为速度和隐私设计的 **多平台 (macOS/iOS)** 高级
 - **[iOS 规约：听写即输入法](ios/Spec.md)** — iOS 平台的系统架构、UI 交互（键盘扩展）及技术规约详情。
 - **[iOS UI 实施规约（SwiftUI Native / Liquid Glass）](ios/UI-SwiftUI-Native-LiquidGlass-Spec.md)** — 基于当前代码的 UI 统一规范，重点覆盖原生组件优先、液态玻璃风格和视觉一致性。
 - **[iOS 主 App 与键盘扩展通信与状态机](ios/Host-Keyboard-Communication-StateMachine.md)** — 说明跨进程通信协议、状态同步与容错机制（心跳、看门狗、幂等注入）。
+- **[iOS 键盘/宿主会话策略](ios/iOS-Keyboard-Host-Session-Policy.md)** — 跨进程 App Group 共享的会话阶段语义、所有权规则与看门狗判定。
 - _iOS 开发指南与 UI 规范详述稍后补充。_
