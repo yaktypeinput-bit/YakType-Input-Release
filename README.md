@@ -46,7 +46,7 @@ YakType 是一款面向速度与隐私的多平台语音输入与文本润色产
 
 - [iOS 规约：听写即输入法](ios/Spec.md)
 - [iOS UI 实施规约（SwiftUI Native / Liquid Glass）](ios/UI-SwiftUI-Native-LiquidGlass-Spec.md)
+- [iOS Toolbar 规范](ios/Toolbar-Spec.md)
 - [主 App 与键盘扩展通信机制与状态机](ios/Host-Keyboard-Communication-StateMachine.md)
 - [键盘/宿主会话策略](ios/iOS-Keyboard-Host-Session-Policy.md)
 - [Typography Spec](ios/TypographySpec.md)
-
