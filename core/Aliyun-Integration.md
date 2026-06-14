@@ -28,7 +28,8 @@
 
 | 参数名 | 默认值 | 描述 |
 | :--- | :--- | :--- |
-| `apiKey` | (空) | 阿里云 DashScope 管理控制台申请的有效密钥。 |
+| `managedKeyID` | (空) | 关联的统一管理密钥 ID（UUID 字符串），系统以此到统一密钥池查询并解析出密钥，推荐配置。 |
+| `apiKey` | (空) | （已弃用，保留旧版兼容）阿里云 DashScope 管理控制台申请的有效密钥。 |
 | `modelName` | `qwen-asr-latest` | 调用的模型标识符。可选 `qwen-asr-v1` 或最新快照。 |
 | `endpoint` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 兼容 OpenAI 协议的中转网关。 |
 

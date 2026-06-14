@@ -2,43 +2,145 @@
 
 ## 概要说明
 
-本文档详述了 `SpeechRecognitionEngine` 协议的设计规范。该协议是 YakType 实现多引擎支持（包括 Apple 原生与 Gemini）的核心抽象层。通过阅读本文档，您可以了解如何为系统增加新的转录或润色引擎，以及引擎在运行时的状态转换与数据处理要求。
+本文档说明 YakType 当前用于统一听写与后处理引擎的协议层：`SpeechRecognitionEngine`。它描述的是当前代码中的真实协议，而不是抽象化的旧版本说明。
 
-## 协议定义 (SpeechRecognitionEngine)
+## 1. 协议定位
 
-所有 AI 引擎必须实现 `SpeechRecognitionEngine` 协议，以确保能被 `TranscriptionService` 统一调度。
+`SpeechRecognitionEngine` 是所有引擎实现的统一入口，负责：
 
-### 核心属性
-*   **`status`**: 引擎当前的运行状态（详见下文状态说明）。
-*   **`transcript`**: 引擎当前已识别/生成的文本内容。
-*   **`statusMessage`**: 面向用户的状态描述语。
-*   **`selectedLanguage`**: 识别语言（如 "zh-CN", "en-US" 或 "auto"）。
+- 接收音频 segment 或整段文件进行听写
+- 对文本执行可选的后处理
+- 对外暴露状态、转写结果、提示语与配置能力
 
-### 核心方法
-1.  **`process(audioChunk: [Float])`**：处理来自音频捕获器的实时 PCM 数据块。
-2.  **`process(fileURL: URL)`**：处理离线音频文件。
-3.  **`polish(text: String, prompt: String)`**：可选方法。接收原始文本与 Prompt，返回润色后的文本。
-4.  **`apply(config: EngineProfileConfig)`**：将持久化的 `EngineProfile` 配置应用到引擎实例。
-5.  **`cancel() / reset()`**：任务取消与缓冲区清理。
+该协议位于：
 
-## 引擎状态 (SpeechEngineStatus)
+- `yaktype/Sources/Shared/Engines/SpeechRecognitionEngine.swift`
 
-引擎必须在处理过程中准确报告以下状态：
+## 2. 当前协议定义
 
-| 状态 | 说明 |
-| :--- | :--- |
-| `idle` | 初始状态，未加载任务。 |
-| `processing` | 正在进行网络请求或本地推理。 |
-| `ready` | 任务处理完成，结果已准备就绪。 |
-| `error(String)` | 处理发生异常，携带具体错误信息。 |
+### 2.1 必备属性
 
-## 接入新引擎的步骤
+| 属性 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `configuration` | `EngineConfiguration` | 引擎的分段与重试参数 |
+| `status` | `SpeechEngineStatus` | 当前运行状态 |
+| `transcript` | `String` | 当前引擎输出文本 |
+| `statusMessage` | `String` | 面向 UI 的提示信息 |
+| `selectedLanguage` | `String` | 当前识别语言 |
+| `currentPrompt` | `String` | 当前绑定的提示词 |
+| `hasPendingRealtimeRequest` | `Bool` | 是否仍有实时请求在途 |
+| `preferredDictationAudioFormat` | `DictationAudioFormat` | 听写上传偏好的音频格式 |
 
-1.  **实现协议**：在 `Sources/Shared/Engines` 下创建新目录并实现 `SpeechRecognitionEngine`。
-2.  **扩展配置**：在 `EngineProfileConfig` 枚举中增加对应的配置子项，并定义 `ConfigFieldDescriptor` 以渲染 UI。
-3.  **注册工厂**：在 `SpeechEngineFactory` 中增加新引擎的创建逻辑。
-4.  **UI 适配**：在 `EngineType` 枚举中增加类型定义，以供用户在设置界面选择。
+### 2.2 必备方法
 
-## 异常处理规范
-*   引擎内部应自行处理网络超时与重试逻辑。
-*   严重的 API 错误（如 Credential 无效、配额超限）应通过 `.error` 状态向上抛出，并由 Service 层反馈给用户。
+```swift
+func process(audioChunk: [Float])
+func process(fileURL: URL)
+func cancel()
+func reset()
+func requestAuthorization()
+func polish(text: String, prompt: String) async throws -> String
+func apply(config: EngineProfileConfig, resolvedAPIKey: String)
+```
+
+与旧文档相比，当前协议有两个必须注意的差异：
+
+1. `apply` 现在接收的是“已解析后的最终 API Key”，而不是要求引擎自行查找密钥池。
+2. 协议显式声明了 `preferredDictationAudioFormat` 和 `hasPendingRealtimeRequest`，供音频上传与桥接层判断。
+
+## 3. 相关支持类型
+
+### 3.1 `SpeechEngineStatus`
+
+当前状态枚举：
+
+- `idle`
+- `processing`
+- `ready`
+- `error(String)`
+
+### 3.2 `EngineConfiguration`
+
+当前字段：
+
+- `maxSegmentDuration`
+- `delayBetweenSegments`
+- `minRealtimeSegmentDuration`
+- `realtimeSegmentRetryLimit`
+
+说明：
+
+- 这组参数直接影响 `RealtimeTranscriptionCoordinator` 的切段与节流行为。
+- 引擎实现不能只关心 `maxSegmentDuration`，还应考虑实时 segment 的最小时长和重试上限。
+
+### 3.3 `DictationAudioFormat`
+
+当前支持：
+
+- `.oggOpus`
+- `.wav16kMonoPcm16`
+
+通过 `mimeType` 提供上传时的 MIME 映射。
+
+## 4. 当前引擎能力边界
+
+| 引擎 | 角色 | 说明 |
+| :--- | :--- | :--- |
+| `Apple` | `dictation` | 原生听写 |
+| `Gemini` | `dictation` + `polishing` | 双能力引擎 |
+| `AliCloud QwenASR` | `dictation` | 云端听写 |
+| `Xiaomi MiMo ASR` | `dictation` | 云端听写 |
+| `OpenAI (Compatible)` | `polishing` | 仅文本后处理 |
+
+## 5. 引擎实现要求
+
+### 5.1 听写类引擎
+
+必须正确处理：
+
+- `process(audioChunk:)`
+- `process(fileURL:)`
+- 分段状态回写
+- 取消与 reset 清理
+
+如果引擎存在实时请求队列，应准确返回 `hasPendingRealtimeRequest = true`，避免桥接层误判任务已结束。
+
+### 5.2 后处理类引擎
+
+至少要可靠实现：
+
+- `polish(text:prompt:)`
+- `apply(config:resolvedAPIKey:)`
+
+对不支持音频处理的引擎，可以让 `process(audioChunk:)` / `process(fileURL:)` 保持空实现或直接失败，但不能破坏协议一致性。
+
+## 6. 配置应用规范
+
+### 6.1 统一密钥解析
+
+密钥解析责任在 `EngineProfile.resolveAPIKey(in:)` 与 service 层，而不是散落在各引擎内部。
+
+因此：
+
+- 引擎实现不要依赖自己再去查 `ManagedKey`
+- `apply(config:resolvedAPIKey:)` 应把 `resolvedAPIKey` 视为最终可用值
+
+### 6.2 提示词绑定
+
+引擎收到的 prompt 可能来自：
+
+- `EngineProfile.promptTemplateID`
+- 内置模板本地化正文
+- 运行时 `repolish` 传入的显式 prompt
+
+引擎不需要关心 prompt 的来源，只需按最终字符串执行。
+
+## 7. 接入新引擎的最小步骤
+
+1. 在 `EngineType` 中新增 case，并声明 `supportedRoles`
+2. 在 `EngineProfileConfig` 中新增配置 case
+3. 增加对应 `*EngineConfig` 与 `fields`
+4. 在 `EngineProfile.defaultConfig(for:)` 与 `fromDictionary` 中注册
+5. 在 `SpeechEngineFactory` 中接入实例化逻辑
+6. 校正平台 UI 中的穷举分支和展示文案
+

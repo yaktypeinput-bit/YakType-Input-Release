@@ -23,7 +23,8 @@ Gemini 引擎通过 Google Generative Language REST API 实现，采用 `v1beta`
 
 | 参数名 | 说明 | 推荐值 |
 | :--- | :--- | :--- |
-| `apiKey` | Google AI Studio 申请的 API 密钥。 | - |
+| `managedKeyID` | 关联的统一管理密钥 ID（UUID 字符串）。系统以此到统一密钥池查询并解析出密钥，推荐配置。 | - |
+| `apiKey` | （已弃用，保留旧版兼容）行内 API 密钥（Plain-text）。 | - |
 | `modelName` | 调用的模型版本。 | `gemini-3.1-flash-lite-preview` |
 
 ## 优化逻辑

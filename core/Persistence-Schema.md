@@ -1,85 +1,145 @@
 # 持久化架构与同步方案 (Persistence & Sync Schema)
 
-本文档详细描述了 YakType 项目的数据存储策略，涵盖了本地数据库 (SwiftData)、共享首选项 (UserDefaults) 以及跨设备同步方案 (iCloud JSON)。
+## 概要说明
 
-## 1. 存储层级概览 (Architecture Layers)
+本文档说明 YakType 当前在代码中的持久化分层，包括 SwiftData、进程内 `UserDefaults`、iOS App Group 共享存储以及 iCloud JSON 同步。重点是“哪些数据存在哪里、为什么在那里、是否跨进程或跨设备同步”。
 
-YakType 采用多层持久化方案，以平衡性能、跨进程访问需求以及云同步的原子性。
+## 1. 持久化分层
 
-| 存储引擎 | 物理位置 | 访问域 | 主要用途 |
+| 存储层 | 访问范围 | 当前用途 |
+| :--- | :--- | :--- |
+| SwiftData | App 主进程 | 历史记录、引擎配置、流水线、提示词、密钥池 |
+| `UserDefaults.standard` | 单进程本地 | 本地 UI 偏好、引导进度、时长选择等 |
+| App Group `UserDefaults` | iOS 宿主 + 键盘扩展 | 键盘桥接快照、命令队列、心跳、共享状态 |
+| iCloud JSON (`AppSyncProfile`) | 跨设备 | 配置与资料同步，不含任务历史音频 |
+
+## 2. SwiftData 实体范围
+
+当前会持久化到 SwiftData 的实体：
+
+- `TranscriptionTask`
+- `EngineProfile`
+- `ProcessingPipeline`
+- `PromptTemplate`
+- `ManagedKey`
+
+同步层面对这些实体的处理并不完全一致：
+
+- `TranscriptionTask`：本地历史，不参与云同步
+- 其他 4 类配置实体：可进入同步资料
+
+## 3. 文件路径与容器
+
+### 3.1 数据库文件
+
+数据库路径由 `AppPaths.databaseURL` 统一计算：
+
+- `macOS`：`Application Support/<bundle-like-folder>/default.sqlite`
+- `iOS`：优先放入 App Group 容器内的 `default.sqlite`
+
+### 3.2 录音与 segment
+
+- `recordingsDirectory`：最终录音文件
+- `segmentsDirectory`：处理中间 segment
+
+当前实现中：
+
+- `iOS` 使用 App Group 容器下的 `Recordings` / `Segments`
+- `macOS` Release 使用 `Application Support` 和 `Caches`
+- `macOS` Debug 使用更便于开发排查的本地目录
+
+## 4. `UserDefaults` 分层语义
+
+### 4.1 本地进程设置
+
+由 `LocalAppSettings.defaults` 承载，典型字段包括：
+
+- `onboardingCompleted`
+- `selectedSessionDuration`
+- `selectedAppLanguage`
+- `autoDeletePolicy`
+- `showDockIcon`
+
+这些值默认不要求键盘扩展可见，因此不强制进入 App Group。
+
+### 4.2 App Group 共享状态
+
+当前 App Group 标识符：
+
+- `group.com.yaktype.shared`
+
+桥接层通过 `KeyboardSharedBridge.sharedDefaults` 访问，关键 key 包括：
+
+- `keyboard.syncSnapshot`
+- `keyboard.pendingRequest`
+- `keyboard.pendingRequestQueue`
+- `keyboard.debugLog`
+- `keyboard.lastSeenTimestamp`
+- `keyboard.reportedFullAccess`
+
+注意：
+
+- 这部分主要服务于 iOS 键盘桥接，不是通用配置仓库。
+- 当容器不可用时，`SharedAppGroup.defaultsIfAvailable` 会返回 `nil`，以避免启动阻塞。
+
+## 5. iCloud 同步资料：`AppSyncProfile`
+
+当前同步载荷是一个版本化 JSON 容器，不是直接同步 SQLite。
+
+### 5.1 当前版本
+
+`AppSyncProfile.version` 当前默认为 `2`。
+
+### 5.2 关键字段
+
+- `sharedSettings`
+- `iosSettings`
+- `macSettings`
+- `iosPipelines`
+- `macPipelines`
+- `managedKeys`
+- `engineProfiles`
+- `promptTemplates`
+- `tombstones`
+
+这意味着当前同步已经从早期“单一扁平 settings/pipelines”演进到带平台作用域的版本 2 结构。
+
+### 5.3 Tombstone 机制
+
+删除同步配置时，会通过 `SyncTombstoneDTO` 记录：
+
+- `id`
+- `entityType`
+- `scope`
+- `deletedAt`
+
+其作用是避免“本地删掉、远端又被旧数据恢复”的回流问题。
+
+## 6. 实体与同步策略
+
+| 实体 / 数据 | 本地持久化 | 跨进程 | 跨设备同步 |
 | :--- | :--- | :--- | :--- |
-| **SwiftData (SQLite)** | `Application Support/default.sqlite` | App 主进程 | 核心业务实体（历史记录、引擎配置、提示词模板）。 |
-| **Shared Defaults** | `UserDefaults (Suite: group.com.yaktype.shared)` | App + 键盘扩展 | 跨进程共享配置（开关状态、当前选中的引擎 ID）。 |
-| **Local Defaults** | `UserDefaults.standard` | App 主进程 | 设备特定或 UI 状态（是否完成引导、Dock 图标显示）。 |
-| **iCloud Sync** | `iCloud Documents/YakTypeSync.json` | 跨设备 | 配置文件的原子性跨设备迁移。 |
+| `TranscriptionTask` | 是 | 否 | 否 |
+| `EngineProfile` | 是 | 否 | 是 |
+| `ProcessingPipeline` | 是 | 否 | 是 |
+| `PromptTemplate` | 是 | 否 | 是 |
+| `ManagedKey` | 是 | 否 | 是 |
+| 键盘命令/快照 | 否（短期共享） | 是 | 否 |
+| 引导状态 | 是 | 否 | 否 |
 
----
+## 7. 当前重要语义
 
-## 2. 实体关系与存储映射 (Mapping Table)
+### 7.1 统一密钥池已进入 SwiftData
 
-下表列出了核心数据项及其所属的存储引擎与同步状态：
+`ManagedKey` 不再是仅存于 `UserDefaults` 的临时数据。引擎配置通过 `managedKeyID` 引用它，运行时再解析出真实密钥。
 
-| 类别 | 数据项 | 存储引擎 | 云同步? | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| **业务历史** | `TranscriptionTask` | SwiftData | ❌ 否 | 包含录音文件路径与本地文本，暂不同步。 |
-| **引擎管理** | `EngineProfile` | SwiftData | ✅ 是 | 包含引擎类型、Role、参数配置。 |
-| | `ManagedKey` | SwiftData | ✅ 是 | **[新]** 已从 UserDefaults 迁移至 SwiftData。 |
-| **流水线** | `ProcessingPipeline` | SwiftData | ✅ 是 | 定义转录+润色的组合。 |
-| **内容指令** | `PromptTemplate` | SwiftData | ✅ 是 | AI 润色所用的系统提示词。 |
-| **系统配置** | `App Language` | UserDefaults | ✅ 是 | 保持各设备 UI 语言一致。 |
-| | `Auto-Delete Policy` | UserDefaults | ✅ 是 | 记录清理策略。 |
-| **状态/环境**| `Onboarding Status` | UserDefaults | ❌ 否 | 每台设备需独立完成引导。 |
-| | `Audio Device ID` | UserDefaults | ❌ 否 | 不同设备的硬件标识符不同。 |
+### 7.2 内置提示词与订阅提示词是不同来源
 
----
+`PromptTemplate.source` 当前至少有三类：
 
-## 3. 详细模式说明 (Detailed Schema)
+- `builtin`
+- `subscription`
+- `user`
 
-### 3.1 SwiftData 实体
+同步与 UI 操作时要考虑只读约束，而不是把所有模板视作同一类型。
 
-```mermaid
-erDiagram
-    ProcessingPipeline ||--|| EngineProfile : "targetDictation"
-    ProcessingPipeline ||--o| EngineProfile : "targetPolishing"
-    EngineProfile ||--o| PromptTemplate : "baseTemplate"
-    EngineProfile ||--o{ ManagedKey : "uses (referenced by ID)"
-    TranscriptionTask }|--o| EngineProfile : "history reference"
-```
-
-> [!IMPORTANT]
-> **ManagedKey 存储安全**：
-> `ManagedKey.secret` 目前在数据库中进行存储。为了安全起见，引擎配置 (`EngineProfile`) 仅通过 UUID 引用 Key 池中的项，不直接持有密钥字符串。
-
-### 3.2 UserDefaults (App Group)
-
-所有涉及键盘扩展（Keyboard Extension）访问的配置均存储在 `group.com.yaktype.shared` 中：
-* `selectedEngineType`: 当前全局激活的引擎类型。
-* `isCloudSyncEnabled`: 同步总开关。
-* `pipelineDictationEngineType`: iOS 侧滑动触发的专用引擎映射。
-
----
-
-## 4. iCloud 同步逻辑 (CloudSyncManager)
-
-### 4.1 同步周期
-* **导出 (Export)**：当应用切入后台 (`.background`)、配置变更或用户手动点击“同步”。采用 5 秒防抖处理。
-* **导入 (Import)**：当应用启动、从后台切回前台 (`.active`)。
-
-### 4.2 冲突解决
-* **策略**：**最后更新者胜 (Last Writer Wins)**。
-* **逻辑**：每个 DTO 对象均包含 `updatedAt` 时间戳。同步时，若云端文件中的时间戳晚于本地实体，则执行 `update(from:)`；否则保留本地。
-
-### 4.3 目录可见性
-同步文件路径为：`iCloud Drive/YakType/YakTypeSync.json`。
-用户可以通过文件应用或 Finder 手动查看同步内容。
-
----
-
-## 5. 迁移历史 (Migration Notes)
-
-* **v0.2.0**: `ManagedKey` 从 `UserDefaults` 重构并迁移至 `SwiftData`。应用启动时，`AppInitializer` 会自动扫描旧的 `AppGroup` 存储并将其平滑迁移至数据库。
-
----
-
-> [!NOTE]
-> 开发者如需添加新的配置项，应根据该项是否需要被键盘访问来决定选择 `sharedDefaults` 还是 `standard`。

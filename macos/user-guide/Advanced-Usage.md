@@ -2,64 +2,108 @@
 
 ## 概要说明
 
-本文档详述了 YakType 的进阶操作模式，包括如何通过提示词模板（Prompt Templates）自定义 AI 处理逻辑、非实时音频文件的导入转录机制，以及系统存储的自动清理与维护策略。
+本文档说明当前工程代码已经具备的进阶能力，包括提示词模板体系、统一密钥池、音频/任务持久化路径以及若干维护语义。内容以现有实现为准，不延伸未落地功能。
 
----
+## 1. 提示词模板体系
 
-## 1. 提示词模板工程 (Prompt Template Engineering)
+### 1.1 模板来源
 
-提示词模板是驱动润色引擎的核心指令。系统支持为不同的工作流绑定专属模板。
+当前 `PromptTemplate.source` 至少有三类：
 
-### 1.1 系统预设模板
-*   **默认 (Standard ASR)**：专注于修正 ASR 噪音、同音字纠错及标点符号。
-*   **指令化操作**：用户可利用提示词实现特定垂直场景的转换（如翻译为英文、提取代码段）。
+- `builtin`
+- `subscription`
+- `user`
 
-### 1.2 注入占位符 (Context Injection)
-应用在执行润色请求时，会将听写草案通过以下上下文格式化：
+这三类在当前代码里不是同一语义：
 
-```text
-[System Instruction]
-Draft Input: {RawText}
-Output:
-```
+- `builtin`：系统内置，只读，可按语言本地化
+- `subscription`：远端订阅导入，只读
+- `user`：用户可编辑模板
 
-*   **原则**：提示词应遵循“零对话 (Zero-Shot)”模式，强制 AI 仅输出处理后的纯文本，不包含任何解释性描述。
+### 1.2 当前内置模板
 
----
+当前代码内置两个系统模板：
 
-## 2. 非实时音频处理 (External Audio Import)
+1. `Dictation Polishing`
+2. `Chinese-to-English Translation`
 
-除了实时语音捕获，系统提供独立的文件处理路径：
+它们通过稳定的 `externalUUID` 和 `systemPresetKey` 管理，而不是只靠名字匹配。
 
-*   **触发入口**：主窗口 (Main Window) -> 导入文件 (Import)。
-*   **支持格式**：`.ogg`, `.wav`, `.m4a`, `.mp3` (取决于系统受限的支持范围)。
-*   **处理机制**：利用 `TranscriptionService.processImportedFile` 接口。导入后，任务会被加入后台异步队列，完成后用户可通过历史记录进行维护。
+### 1.3 模板与引擎的关系
 
----
+Prompt 当前绑定在 `EngineProfile.promptTemplateID` 上，而不是绑定在任务记录上。
 
-## 3. 任务生命周期与自动清理 (Persistence Policy)
+这意味着：
 
-系统产生的所有数据（音频切片、转录任务、API 调用日志）均受限于本地持久化策略。
+- 一个后处理引擎实例可以代表一种固定的 prompt 语义
+- 历史任务不再以 prompt 名称作为主要上下文主键
 
-### 3.1 自动清理规则 (Auto-Delete Policy)
-为了保护隐私并控制磁盘占用，支持以下过期删除策略：
-*   **Never**：永久保留。
-*   **After 7 / 30 / 90 Days**：根据 `task.date` 自动判断并移除对应的音频物理文件及其数据库条目。
+## 2. 统一密钥池
 
-### 3.2 手动维护 (Manual Management)
-用户可随时在“历史记录 (History)”面板中执行以下原子操作：
-*   **Re-Transcribe**：保留原音频，使用新选定的听写引擎重试。
-*   **Re-Polish**：对现有的转录稿，使用不同的 Prompt 模板重新润色。
-*   **Export**：将原始音频切片导出为 `.ogg` 文件。
+### 2.1 当前模型
 
----
+云端引擎配置支持两种密钥方式：
 
-## 数据存储路径 (File System)
+- `apiKey`
+- `managedKeyID`
 
-| 数据类型 | 物理路径 | 备注 |
-| :--- | :--- | :--- |
-| **音频源文件** | `~/Library/Application Support/com.yaktype.yak-mac/recordings/` | `.ogg` 格式存储。 |
-| **数据库** | `~/Library/Application Support/com.yaktype.yak-mac/default.store` | SwiftData 持久化层。 |
-| **临时缓存** | `~/Library/Caches/com.yaktype.yak-mac/` | 用于音频切片的流式缓冲。 |
+`managedKeyID` 指向 `ManagedKey` 实体，后者保存：
 
-*注意：调试模式（DEBUG）下的存储路径会带有 `-debug` 后缀，以防止开发测试数据对生产环境产生干扰。*
+- `name`
+- `secret`
+- `createdAt`
+- `updatedAt`
+
+### 2.2 删除约束
+
+若某个 `ManagedKey` 正被引擎实例引用，当前 UI 会阻止删除，并给出引用说明。这不是前端层面的静态校验，而是基于 `ManagedKeyDomainService.referencingProfiles` 的运行时判断。
+
+## 3. 任务与文件持久化
+
+### 3.1 历史记录
+
+任务历史由 `TranscriptionTask` 保存，包含：
+
+- 音频路径
+- 原始文本
+- 后处理文本
+- 引擎 profile 引用
+- 时长/错误等元数据
+
+### 3.2 存储路径
+
+由 `AppPaths` 统一计算：
+
+- 录音文件：`recordingsDirectory`
+- 中间 segment：`segmentsDirectory`
+- 数据库：`databaseURL`
+
+说明：
+
+- `macOS` Release 主要使用 `Application Support` / `Caches`
+- `macOS` Debug 为便于开发排查，会使用更直接的本地路径
+
+## 4. 自动种子与恢复
+
+### 4.1 内置提示词恢复
+
+当前初始化逻辑不是“插入单条默认 prompt”，而是统一走 `restoreBuiltInPrompts()`：
+
+- 若内置模板存在，则按 `externalUUID` 精确更新
+- 若不存在，则插入
+- 不再按名字宽松合并，避免污染订阅模板
+
+### 4.2 默认引擎与流水线
+
+`AppInitializer` 还会确保：
+
+- 至少存在一条默认流水线
+- 至少存在一个 Apple 听写实例
+- 至少存在一个 Gemini 后处理实例
+
+## 5. 当前维护建议
+
+1. 如果修改提示词导入逻辑，优先检查 `PromptTemplate.externalUUID`、`source` 与 `systemPresetKey` 的兼容性。
+2. 如果修改密钥模型，不要把“密钥明文”重新散落回 `EngineProfile` 顶层字段。
+3. 如果修改任务展示或重试逻辑，先确认 `TranscriptionTask` 的兼容字段是否仍被依赖。
+

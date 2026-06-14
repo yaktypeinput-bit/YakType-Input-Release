@@ -23,7 +23,8 @@
 
 | 参数名 | 说明 | 示例值 |
 | :--- | :--- | :--- |
-| `apiKey` | API 密钥。 | `sk-xxxx...` |
+| `managedKeyID` | 关联的统一管理密钥 ID（UUID 字符串）。系统以此到统一密钥池查询并解析出密钥，推荐配置。 | - |
+| `apiKey` | （已弃用，保留旧版兼容）行内 API 密钥（Plain-text）。 | `sk-xxxx...` |
 | `baseURL` | API 的根地址。 | `https://api.openai.com/v1` |
 | `modelName` | 调用的模型标识符。 | `gpt-4o`, `deepseek-chat` |
 | `temperature` | 生成温度（0.0 - 1.0）。 | `0.1` |
