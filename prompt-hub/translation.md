@@ -1,7 +1,6 @@
 ---
 uuid: "c3a64b9b-8e12-4f3d-9c3f-7e8c0e123456"
 name: "中英翻译"
-model: "Gemini"
 version: "1.0"
 ---
 

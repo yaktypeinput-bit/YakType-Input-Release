@@ -1,7 +1,7 @@
 import os
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 def parse_frontmatter(content):
     """
@@ -22,8 +22,7 @@ def parse_frontmatter(content):
     return metadata, actual_content.strip()
 
 def generate_package():
-    # Since the script is now inside prompt-hub, 
-    # the search directory is the same as the script directory
+    # Prompt files live directly in prompt-hub; do not infer metadata from folders.
     script_dir = os.path.dirname(os.path.abspath(__file__))
     prompt_hub_dir = script_dir
     output_file = os.path.join(script_dir, "..", "prompt-package.json")
@@ -38,54 +37,49 @@ def generate_package():
         "displayName": "YakType 官方提示词包",
         "author": "YakType Team",
         "description": "来自 YakType-Input-Release 的官方标准提示词集合。",
-        "updatedAt": datetime.now().isoformat() + "Z",
+        "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "prompts": []
     }
 
-    # Use os.walk to recursively find markdown files
-    for root, dirs, files in os.walk(prompt_hub_dir):
-        for filename in files:
-            if filename.endswith(".md") and filename != "README.md":
-                filepath = os.path.join(root, filename)
-                
-                # Model name is the parent directory name (if not prompt-hub itself)
-                parent_dir = os.path.basename(root)
-                model_name = parent_dir if parent_dir != prompt_hub_dir else "General"
-                
-                with open(filepath, "r", encoding="utf-8") as f:
-                    file_content = f.read()
-                    if not file_content:
-                        continue
-                    
-                    metadata, content = parse_frontmatter(file_content)
-                    
-                    # Extract title from content if meta name is missing
-                    if "name" not in metadata:
-                        first_line = content.splitlines()[0].strip() if content.splitlines() else ""
-                        name = first_line.lstrip("# ").strip() if first_line.startswith("#") else filename
-                    else:
-                        name = metadata["name"]
-                    
-                    # UUID from metadata is mandatory for stable tracking
-                    # If missing, fallback to filename-based ID (but warn)
-                    prompt_id = metadata.get("uuid")
-                    if not prompt_id:
-                        print(f"Warning: Missing 'uuid' in metadata for {filepath}. Using filename-based ID.")
-                        prompt_id = os.path.splitext(filename)[0]
-                    
-                    # Use model from metadata if present, otherwise from folder name
-                    model = metadata.get("model", model_name)
-                    
-                    # Add version if present (useful for tracking updates)
-                    version = metadata.get("version", "1.0")
-                    
-                    package["prompts"].append({
-                        "id": prompt_id,
-                        "name": name,
-                        "model": model,
-                        "version": version,
-                        "content": content
-                    })
+    for filename in sorted(os.listdir(prompt_hub_dir)):
+        filepath = os.path.join(prompt_hub_dir, filename)
+        if not filename.endswith(".md") or filename == "README.md" or not os.path.isfile(filepath):
+            continue
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            file_content = f.read()
+            if not file_content:
+                continue
+
+        metadata, content = parse_frontmatter(file_content)
+
+        # Extract title from content if meta name is missing
+        if "name" not in metadata:
+            first_line = content.splitlines()[0].strip() if content.splitlines() else ""
+            name = first_line.lstrip("# ").strip() if first_line.startswith("#") else filename
+        else:
+            name = metadata["name"]
+
+        # UUID from metadata is mandatory for stable tracking
+        # If missing, fallback to filename-based ID (but warn)
+        prompt_id = metadata.get("uuid")
+        if not prompt_id:
+            print(f"Warning: Missing 'uuid' in metadata for {filepath}. Using filename-based ID.")
+            prompt_id = os.path.splitext(filename)[0]
+
+        # Model information comes from frontmatter, never from the file path.
+        model = metadata.get("model", "General")
+
+        # Add version if present (useful for tracking updates)
+        version = metadata.get("version", "1.0")
+
+        package["prompts"].append({
+            "id": prompt_id,
+            "name": name,
+            "model": model,
+            "version": version,
+            "content": content
+        })
 
     # Sort prompts by name for consistency
     package["prompts"].sort(key=lambda x: x["name"])
